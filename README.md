@@ -1,9 +1,4 @@
-# semantic_vlm_privacy_extabs
-
-Minimal code snapshot aligned with the extended abstract:
-
-- [VizWiz_Workshop_2026-3.pdf](./VizWiz_Workshop_2026-3.pdf)
-- Title: `VLM-Guided Detection and Rematching for Private Object Localization`
+# VLM-Guided Detection and Rematching for Private Object Localization
 
 This repo keeps only the runtime path used by the abstract:
 
