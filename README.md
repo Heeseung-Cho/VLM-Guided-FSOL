@@ -16,8 +16,8 @@ vision-language reasoning process followed by mask generation:
 
 1. **Semantic query generation.** A VLM predicts a privacy supercategory and
    detector-friendly textual cues for each query image.
-2. **Family expansion.** The predicted supercategory is expanded into its
-   allowed privacy-category family.
+2. **Supercategory expansion.** The predicted supercategory is expanded into
+   its allowed leaf categories.
 3. **Candidate detection.** Grounding DINO proposes candidate bounding boxes
    using the semantic cues from Stage 1.
 4. **VLM rematching.** The VLM jointly reviews all detected candidates in the
@@ -32,12 +32,12 @@ that are not part of the released abstract pipeline.
 ## Repository Contents
 
 - `semantic/run_stage1_semantic.py`: VLM semantic query generation.
-- `scripts/expand_stage1_to_family.py`: supercategory-to-family expansion.
+- `scripts/expand_stage1_to_categories.py`: supercategory-to-leaf-category expansion.
 - `semantic/run_stage2_detection.py`: Grounding DINO candidate detection.
 - `semantic/run_stage3_minimal.py`: VLM candidate rematching.
 - `scripts/add_sam_masks.py`: SAM-based mask generation.
 - `scripts/render_support_gt.py`: support-set ground-truth overlay utility.
-- `config/family_category_route4_v1.json`: privacy supercategory taxonomy.
+- `config/supercategory.json`: privacy supercategory taxonomy.
 - `prompts/active/`: prompts used by the released inference path.
 - `runs/run_extended_abstract.sh`: end-to-end query-set runner.
 - `runs/run_support_inference.sh`: support-set inference runner.
@@ -51,27 +51,68 @@ The repository does not include datasets, model weights, or third-party source
 trees. The following assets must be provided by the user:
 
 - query images and a COCO-style metadata JSON file;
-- a Grounding DINO checkpoint compatible with the provided MMDetection config;
+- a Grounding DINO checkpoint compatible with the provided MMDetection config
+  (the authors used `groundingdino_swint_ogc_mmdet-822d7e9d.pth`);
 - a SAM checkpoint, such as `sam_vit_h_4b8939.pth`;
-- a Qwen3-VL model path or Hugging Face model identifier.
+- a Qwen3-VL model path or Hugging Face model identifier (the authors used
+  `Qwen/Qwen3-VL-8B-Instruct`).
 
-Support-set utilities assume the same dataset layout used in the abstract. If
-the data are stored elsewhere, set `PROJECT_ROOT` before running the support
-scripts.
+### Downloading the detector and segmenter checkpoints
+
+The release scripts expect the checkpoint *paths* as command-line arguments,
+so any local directory works. The authors used:
+
+```bash
+mkdir -p checkpoints
+
+# Segment Anything (ViT-H, ~2.4 GB). Official Meta release:
+#   https://github.com/facebookresearch/segment-anything#model-checkpoints
+wget -O checkpoints/sam_vit_h_4b8939.pth \
+  https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth
+
+# Grounding DINO Swin-T (MMDetection port, ~659 MB). Released via the
+# MMDetection model zoo; the checkpoint is the one paired with
+# configs/grounding_dino_swin-t_finetune_8xb2_20e_viz.py shipped in this repo.
+# See https://github.com/open-mmlab/mmdetection/blob/main/configs/grounding_dino/
+# for the current download URL of `groundingdino_swint_ogc_mmdet-822d7e9d.pth`
+# (or fetch it once via `mim download` after installing the OpenMMLab stack).
+```
+
+`Qwen/Qwen3-VL-8B-Instruct` is downloaded automatically from the Hugging Face
+hub on first use; alternatively, point `--llm_model` at a locally mirrored
+copy.
+
+The released support-set utilities assume a `BIV-Priv-Seg`-style layout at
+`${PROJECT_ROOT}/data/Biv-priv-seg/{support_set.json,support_images/}`.
+`PROJECT_ROOT` has no default and must be exported before running the
+`run_support_*` scripts.
 
 ## Environment
 
-The experiments were run in a Conda environment named `psi`. A typical setup is:
+The experiments were run in a Conda environment named `psi` with Python 3.10
+and CUDA 12.8. The pinned versions in `requirements.txt` reflect the authors'
+working setup; other versions may work but were not tested.
 
 ```bash
-conda create -n psi python=3.10
+conda create -n psi python=3.10 -y
 conda activate psi
+
+# 1. PyTorch + torchvision matched to your local CUDA. Adjust the index URL
+#    if you are not on CUDA 12.8.
+pip install torch==2.8.0 torchvision==0.23.0 \
+  --index-url https://download.pytorch.org/whl/cu128
+
+# 2. OpenMMLab stack. mmcv 2.x must be installed via mim, not from PyPI.
+pip install -U openmim
+mim install "mmcv==2.1.0" "mmengine==0.10.7" "mmdet==3.3.0"
+
+# 3. Remaining Python dependencies (Qwen3-VL backend, SAM, COCO eval, etc.).
 pip install -r requirements.txt
 ```
 
-Additional CUDA, PyTorch, MMDetection, Grounding DINO, and SAM compatibility
-requirements depend on the local GPU driver and checkpoint versions. The
-released scripts expect CUDA execution by default.
+The released scripts expect CUDA execution by default. Qwen3-VL-8B, Grounding
+DINO Swin-T, and SAM ViT-H together require roughly 24 GB of GPU memory in
+the configuration used by the authors.
 
 ## End-to-End Inference
 
@@ -131,8 +172,8 @@ The support inference runner writes outputs under
 
 ## Reproducibility Notes
 
-- Stage 1 uses the route4 privacy supercategory taxonomy in
-  `config/family_category_route4_v1.json`.
+- Stage 1 uses the privacy supercategory taxonomy in
+  `config/supercategory.json`.
 - Stage 3 uses the full-image joint rematching path enabled by
   `--per_image_mode`.
 - Checkpoint paths are passed at runtime and are not hard-coded into the
@@ -156,3 +197,10 @@ extended abstract:
 
 Please update the citation entry with the final workshop proceedings metadata
 when it becomes available.
+
+## License
+
+The code in this repository is released under the Apache License 2.0;
+see [LICENSE](LICENSE) for the full text. External components — Grounding
+DINO, Segment Anything, MMDetection, and Qwen3-VL — are governed by their
+respective upstream licenses, which the user must consult separately.

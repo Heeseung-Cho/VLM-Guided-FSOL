@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_ROOT="${PROJECT_ROOT:-/home/choheeseung/workspace/vlm-privacy}"
+if [ -z "${PROJECT_ROOT:-}" ]; then
+  echo "PROJECT_ROOT must point to a directory containing data/Biv-priv-seg/{support_set.json,support_images/}." >&2
+  echo "  export PROJECT_ROOT=/path/to/dataset_root" >&2
+  exit 1
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUPPORT_JSON="${PROJECT_ROOT}/data/Biv-priv-seg/support_set.json"
 IMAGE_DIR="${PROJECT_ROOT}/data/Biv-priv-seg/support_images"

@@ -99,10 +99,8 @@ def main() -> None:
         outputs.append({
             'image_id': record['image_id'],
             'query_image_path': record['query_image_path'],
-            'support_image_paths': record['support_image_paths'],
-            'controller_mode': record['controller_mode'],
             'null_policy': record['null_policy'],
-            'semantic_family': record['semantic_family'],
+            'semantic_supercategory': record['semantic_supercategory'],
             'route_type': record.get('route_type', ''),
             'semantic_categories': record.get('semantic_categories', []),
             'proposal_prompts': prompt_list,

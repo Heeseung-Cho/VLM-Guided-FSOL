@@ -10,7 +10,12 @@ LLM_MODEL="$1"
 GDINO_CHECKPOINT="$2"
 SAM_CHECKPOINT="$3"
 
-PROJECT_ROOT="${PROJECT_ROOT:-/home/choheeseung/workspace/vlm-privacy}"
+if [ -z "${PROJECT_ROOT:-}" ]; then
+  echo "PROJECT_ROOT must point to a directory containing data/Biv-priv-seg/{support_set.json,support_images/}." >&2
+  echo "  export PROJECT_ROOT=/path/to/dataset_root" >&2
+  exit 1
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUPPORT_DIR="${PROJECT_ROOT}/data/Biv-priv-seg/support_images"
 SUPPORT_JSON="${PROJECT_ROOT}/data/Biv-priv-seg/support_set.json"
@@ -28,15 +33,15 @@ python "${REPO_ROOT}/semantic/run_stage1_semantic.py" \
   --llm_max_new_tokens 180 \
   --llm_decoding_mode deterministic \
   --llm_max_pixels 448 \
-  --family_config "${REPO_ROOT}/config/family_category_route4_v1.json" \
-  --query_prompt_path "${REPO_ROOT}/prompts/active/semantic_query_route4_v1.txt" \
+  --supercategory_config "${REPO_ROOT}/config/supercategory.json" \
+  --query_prompt_path "${REPO_ROOT}/prompts/active/semantic_query.txt" \
   --null_policy skip \
   --save_raw_text
 
-python "${REPO_ROOT}/scripts/expand_stage1_to_family.py" \
+python "${REPO_ROOT}/scripts/expand_stage1_to_categories.py" \
   --input_path "${OUTPUT_ROOT}/stage1/stage1_semantic.json" \
   --output_path "${OUTPUT_ROOT}/stage1_fam/stage1_semantic.json" \
-  --family_config "${REPO_ROOT}/config/family_category_route4_v1.json"
+  --supercategory_config "${REPO_ROOT}/config/supercategory.json"
 
 python "${REPO_ROOT}/semantic/run_stage2_detection.py" \
   --stage1_path "${OUTPUT_ROOT}/stage1_fam/stage1_semantic.json" \
@@ -57,7 +62,7 @@ python "${REPO_ROOT}/semantic/run_stage3_minimal.py" \
   --prompt_path "${REPO_ROOT}/prompts/active/stage3_l0_enriched.txt" \
   --per_image_prompt_path "${REPO_ROOT}/prompts/active/stage3_per_image_norank.txt" \
   --ocr_prompt_path "${REPO_ROOT}/prompts/active/semantic_image_description.txt" \
-  --family_config "${REPO_ROOT}/config/family_category_route4_v1.json" \
+  --supercategory_config "${REPO_ROOT}/config/supercategory.json" \
   --llm_model "${LLM_MODEL}" \
   --device cuda \
   --llm_decoding_mode deterministic \

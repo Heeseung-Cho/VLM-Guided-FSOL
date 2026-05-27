@@ -29,7 +29,7 @@ import tempfile
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from common.vlm import SwiftVLMCaller
-from semantic.family_config import get_family_categories, set_active_family_config
+from semantic.supercategory_config import get_supercategory_categories, set_active_supercategory_config
 from semantic.semantic_gdino_sam import (
     DetectionCandidate,
     _build_reference_match_instruction,
@@ -160,10 +160,10 @@ def _is_document_category(name: str) -> bool:
 
 
 def _is_document_route(route_type: str, shortlist: list[str]) -> bool:
-    # A route is 'document' if any of its family categories are document subtypes,
+    # A route is 'document' if any of its supercategory leaf categories are document subtypes,
     # OR if the current shortlist has any document category.
-    fam_cats = get_family_categories(route_type or '')
-    if fam_cats and any(_is_document_category(c) for c in fam_cats):
+    sup_cats = get_supercategory_categories(route_type or '')
+    if sup_cats and any(_is_document_category(c) for c in sup_cats):
         return True
     return any(_is_document_category(c) for c in shortlist)
 
@@ -192,12 +192,12 @@ def parse_args() -> argparse.Namespace:
                    help='Prompt used for document-routed candidates when --document_ocr is on.')
     p.add_argument('--ocr_prompt_path', default=None,
                    help='Prompt for the OCR pass on each document-routed crop.')
-    p.add_argument('--family_config', default=None,
-                   help='Family config JSON (needed for document-route detection).')
+    p.add_argument('--supercategory_config', default=None,
+                   help='Supercategory taxonomy JSON (needed for document-route detection).')
     p.add_argument('--prefilter_reject', action='store_true',
-                   help='Before Stage-3 classification, run a reject-gate VLM pass per candidate crop. Drop candidates where VLM says not an object of this family.')
+                   help='Before Stage-3 classification, run a reject-gate VLM pass per candidate crop. Drop candidates where VLM says not an object of this supercategory.')
     p.add_argument('--reject_gate_prompt_path', default=None,
-                   help='Prompt for pre-filter reject gate. Uses {{family}} placeholder.')
+                   help='Prompt for pre-filter reject gate. Uses {{supercategory}} placeholder.')
     p.add_argument('--per_image_mode', action='store_true',
                    help='One VLM call per image: show full image with all candidate bboxes numbered; VLM decides keep/category for each box jointly.')
     p.add_argument('--per_image_prompt_path', default=None,
@@ -295,8 +295,8 @@ def main() -> None:
     reject_prompt_text = Path(args.reject_gate_prompt_path).read_text().strip() if args.reject_gate_prompt_path else None
     per_image_prompt_text = Path(args.per_image_prompt_path).read_text().strip() if args.per_image_prompt_path else None
 
-    if args.family_config:
-        set_active_family_config(args.family_config)
+    if args.supercategory_config:
+        set_active_supercategory_config(args.supercategory_config)
 
     use_support = bool(args.support_json and args.support_dir)
     support_refs = []
@@ -519,8 +519,8 @@ def main() -> None:
                 try:
                     # Pre-filter reject gate (per-candidate VLM pass)
                     if args.prefilter_reject and reject_prompt_text:
-                        family_name = route_type or 'target'
-                        rj_prompt = reject_prompt_text.replace('{{family}}', family_name)
+                        supercategory_name = route_type or 'target'
+                        rj_prompt = reject_prompt_text.replace('{{supercategory}}', supercategory_name)
                         rj_raw = client.generate(crop_path, instruction=rj_prompt)
                         rj_decision = _extract_tag(rj_raw, 'object').strip().lower()
                         if rj_decision == 'no':

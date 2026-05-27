@@ -117,23 +117,3 @@ def load_groundingdino_model(config_path="./configs/grounding_dino_swin-t_finetu
 
     return model
 
-def load_clip_model(device="cuda", clip_model_path=None):
-    """
-    Load fine-tuned OpenCLIP model
-    """
-    import open_clip
-    model_name = "ViT-B-16"
-    default_local_pretrained = os.path.join(
-        os.path.dirname(__file__),
-        "checkpoints",
-        "ViT-B-16.pt",
-    )
-    pretrained = clip_model_path or (default_local_pretrained if os.path.exists(default_local_pretrained) else "openai")
-    model, _, preprocess = open_clip.create_model_and_transforms(
-        model_name=model_name,
-        pretrained=pretrained,
-        load_weights_only=False,
-    )
-    tokenizer = open_clip.get_tokenizer(model_name)
-    model.to(device)
-    return model, preprocess, tokenizer

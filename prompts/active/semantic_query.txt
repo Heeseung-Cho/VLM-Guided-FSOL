@@ -1,5 +1,5 @@
 You are given one query image.
-Identify likely private-object categories, choose one routing family, and produce detector-friendly prompts.
+Identify likely private-object categories, choose one routing supercategory, and produce detector-friendly prompts.
 
 Return only the following XML-like fields:
 <route_type>one route chosen from: {{route_list}}, or none</route_type>
