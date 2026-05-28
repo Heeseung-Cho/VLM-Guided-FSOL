@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 import re
 import tempfile
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Sequence
 
 import mmcv
@@ -16,7 +14,6 @@ from common.detection import (
     GroundingDinoLocalizer,
     SamSegmenter,
     dedupe_preserve_order,
-    load_support_image_paths,
 )
 from common.text_utils import preprocess_caption
 from common.vlm import SwiftVLMCaller, release_torch_runtime
@@ -63,13 +60,6 @@ class SemanticCue:
     text_hint_raw: str = ''
     text_hint_summary: str = ''
     text_hint_tokens: list[str] = field(default_factory=list)
-
-
-@dataclass
-class SupportReferenceCrop:
-    image_id: int
-    category_name: str
-    crop_path: str
 
 
 class SemanticController:
@@ -349,53 +339,6 @@ def _save_candidate_crop(query_image_path: str, xyxy: Sequence[float]) -> str:
             release_torch_runtime()
 
 
-def _build_support_reference_crops(
-    support_json_path: str | Path,
-    support_dir: str | Path,
-    reference_source: str = 'crop',
-) -> list[SupportReferenceCrop]:
-    payload = json.loads(Path(support_json_path).read_text())
-    support_dir = Path(support_dir)
-    categories_by_id = {int(cat['id']): cat['name'].replace('_', ' ') for cat in payload.get('categories', [])}
-    images_by_id = {int(image_info['id']): image_info for image_info in payload.get('images', [])}
-    references: list[SupportReferenceCrop] = []
-    for ann in payload.get('annotations', []):
-        image_id = int(ann['image_id'])
-        image_info = images_by_id.get(image_id)
-        if image_info is None:
-            continue
-        category_name = categories_by_id.get(int(ann['category_id']))
-        bbox = ann.get('bbox', [])
-        if not category_name or len(bbox) != 4:
-            continue
-        image_path = support_dir / image_info['file_name']
-        x, y, w, h = bbox
-        if reference_source == 'full_image':
-            reference_path = str(image_path)
-        else:
-            reference_path = _save_candidate_crop(str(image_path), [x, y, x + w, y + h])
-        references.append(SupportReferenceCrop(image_id=image_id, category_name=category_name, crop_path=reference_path))
-    references.sort(key=lambda item: item.image_id)
-    return references
-
-
-def _build_reference_match_instruction(
-    base_instruction: str,
-    support_references: Sequence[SupportReferenceCrop],
-    allowed_categories: Sequence[str],
-) -> str:
-    support_lines = [f'{idx}. {entry.category_name}' for idx, entry in enumerate(support_references, start=1)]
-    allowed_text = ', '.join(allowed_categories) if allowed_categories else 'all support categories'
-    return '\n'.join([
-        base_instruction,
-        '',
-        'The images are ordered as: support reference images first, then one candidate crop last.',
-        'Support reference labels in order:',
-        *support_lines,
-        f'Allowed categories: {allowed_text}',
-    ])
-
-
 def _normalize_phrase(text: str) -> str:
     phrase = (text or '').strip().strip('[](){}')
     phrase = phrase.replace('_', ' ')
@@ -422,6 +365,5 @@ __all__ = [
     'SemanticCue',
     'SemanticController',
     'detect_free_text',
-    'load_support_image_paths',
     'should_run_detection',
 ]

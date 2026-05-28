@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Sequence
 
 import cv2
@@ -33,12 +31,6 @@ def dedupe_preserve_order(items: Sequence[str]) -> list[str]:
         deduped.append(item)
         seen.add(lowered)
     return deduped
-
-
-def load_support_image_paths(support_json_path: str | Path, support_dir: str | Path) -> list[str]:
-    payload = json.loads(Path(support_json_path).read_text())
-    support_dir = Path(support_dir)
-    return [str((support_dir / image_info['file_name']).resolve()) for image_info in payload['images']]
 
 
 class GroundingDinoLocalizer:
@@ -161,5 +153,4 @@ __all__ = [
     'GroundingDinoLocalizer',
     'SamSegmenter',
     'dedupe_preserve_order',
-    'load_support_image_paths',
 ]

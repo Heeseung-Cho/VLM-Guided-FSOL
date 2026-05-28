@@ -32,8 +32,6 @@ from common.vlm import SwiftVLMCaller
 from semantic.supercategory_config import get_supercategory_categories, set_active_supercategory_config
 from semantic.semantic_gdino_sam import (
     DetectionCandidate,
-    _build_reference_match_instruction,
-    _build_support_reference_crops,
     _extract_category_text,
     _extract_tag,
     _save_candidate_crop,
@@ -65,7 +63,6 @@ def _build_per_image_prompt(
     cue: str,
     candidates: list[dict],
     shortlist: list[str],
-    support_category_names: list[str] | None = None,
     ocr_text: str = '',
     ocr_hint: str = '',
     image_size: tuple[int, int] | None = None,
@@ -97,20 +94,6 @@ def _build_per_image_prompt(
     filled = filled.replace('{{ocr_text}}', ocr_text or '(none)')
     filled = filled.replace('{{ocr_hint}}', ocr_hint or '(none)')
     extra = []
-    if support_category_names:
-        n_sup = len(support_category_names)
-        lines = ['Input images in order (the model sees images in this exact order):']
-        for i, name in enumerate(support_category_names, start=1):
-            lines.append(f'  Image {i}: a labeled example of "{name}" (support reference).')
-        lines.append(
-            f'  Image {n_sup + 1} (the last image): the query image with red numbered '
-            'boxes drawn on it. This is the image you must analyze.'
-        )
-        lines.append(
-            'Compare each numbered box in the last (query) image against the labeled '
-            'support examples listed above.'
-        )
-        extra.append('\n'.join(lines))
     if ocr_text:
         extra.append(f'Scene description of the query image: {ocr_text}')
     allowed_block = '\n'.join(f'- {name}' for name in shortlist)
@@ -181,9 +164,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--llm_seed', type=int, default=None)
     p.add_argument('--llm_max_pixels', type=int, default=448)
     p.add_argument('--proposal_score_threshold', type=float, default=0.0)
-    p.add_argument('--support_json', default=None, help='If set with --support_dir, use labeled support crops (L1 mode)')
-    p.add_argument('--support_dir', default=None)
-    p.add_argument('--reference_source', choices=['crop', 'full_image'], default='crop')
     p.add_argument('--enriched_context', action='store_true',
                    help='Inject Stage-1 cue and Stage-2 label_text into prompt (L0-enriched mode)')
     p.add_argument('--document_ocr', action='store_true',
@@ -206,8 +186,6 @@ def parse_args() -> argparse.Namespace:
                    help='VLM generation budget. Per-image mode may need 512+ (multi-box output).')
     p.add_argument('--ocr_doc_route_only', action='store_true',
                    help='In per-image mode, run OCR pass only for document-routed images.')
-    p.add_argument('--support_non_doc_only', action='store_true',
-                   help='In per-image mode, include support crops only for non-document-routed images.')
     p.add_argument('--per_image_force_keep', action='store_true',
                    help='In per-image mode, ignore VLM <keep> tag and keep every candidate above threshold. Isolates category-only contribution for ablation.')
     p.add_argument('--eval', action='store_true', help='Run pycocotools eval after inference')
@@ -248,26 +226,6 @@ def _build_enriched_instruction(
     return f'{filled}\n\nAllowed categories:\n{allowed_block}'
 
 
-def _build_enriched_support_instruction(
-    base_prompt: str,
-    cue: str,
-    label_text: str,
-    shortlist: list[str],
-    support_category_names: list[str],
-    ocr_text: str = '',
-    ocr_hint: str = '',
-) -> str:
-    filled = _fill_enriched_placeholders(base_prompt, cue, label_text, shortlist, ocr_text, ocr_hint)
-    support_lines = '\n'.join(f'{i+1}. {n}' for i, n in enumerate(support_category_names))
-    allowed_block = '\n'.join(f'- {name}' for name in shortlist)
-    return (
-        f'{filled}\n\n'
-        'The images are ordered as: labeled support reference crops first, then the candidate crop last.\n'
-        f'Support reference labels in order:\n{support_lines}\n\n'
-        f'Allowed categories:\n{allowed_block}'
-    )
-
-
 def _normalize(name: str) -> str:
     return ' '.join((name or '').lower().replace('_', ' ').split())
 
@@ -297,14 +255,6 @@ def main() -> None:
 
     if args.supercategory_config:
         set_active_supercategory_config(args.supercategory_config)
-
-    use_support = bool(args.support_json and args.support_dir)
-    support_refs = []
-    if use_support:
-        support_refs = _build_support_reference_crops(
-            args.support_json, args.support_dir, reference_source=args.reference_source,
-        )
-        print(f'[L1] loaded {len(support_refs)} support references')
 
     client = SwiftVLMCaller(
         model_path=args.llm_model,
@@ -390,16 +340,6 @@ def main() -> None:
                     extracted = _extract_tag(ocr_raw, 'text').strip()
                     pi_ocr_text = extracted if extracted else ocr_raw.strip()
                     pi_ocr_hint = ''  # deprecated — taxonomy-leaky
-                # optional support crops
-                support_image_paths_pi = []
-                support_cat_names_pi = []
-                sup_allowed = use_support and (
-                    not args.support_non_doc_only or not is_doc
-                )
-                if sup_allowed:
-                    filtered_refs = [r for r in support_refs if r.category_name in shortlist] or support_refs
-                    support_image_paths_pi = [r.crop_path for r in filtered_refs]
-                    support_cat_names_pi = [r.category_name for r in filtered_refs]
                 # Resolve query image size (after EXIF transpose) for norm1000 bbox coords.
                 with Image.open(query_image_path) as _src:
                     _img_t = ImageOps.exif_transpose(_src)
@@ -407,27 +347,12 @@ def main() -> None:
                 annotated = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False).name
                 try:
                     _annotate_image_with_bboxes(query_image_path, cands_filt, annotated)
-                    pi_prompt = per_image_prompt_text
                     instruction = _build_per_image_prompt(
-                        pi_prompt, cue_text, cands_filt, shortlist,
-                        support_category_names=support_cat_names_pi or None,
+                        per_image_prompt_text, cue_text, cands_filt, shortlist,
                         ocr_text=pi_ocr_text, ocr_hint=pi_ocr_hint,
                         image_size=_img_size,
                     )
-                    if support_image_paths_pi:
-                        # Multi-turn few-shot in-context prompting:
-                        # each support crop is given its own user/assistant turn.
-                        shots = [
-                            (p, f'This is a labeled example of "{n}".')
-                            for p, n in zip(support_image_paths_pi, support_cat_names_pi)
-                        ]
-                        raw = client.generate_few_shot(
-                            shots=shots,
-                            query_image_path=annotated,
-                            instruction=instruction,
-                        )
-                    else:
-                        raw = client.generate(annotated, instruction=instruction)
+                    raw = client.generate(annotated, instruction=instruction)
                 finally:
                     Path(annotated).unlink(missing_ok=True)
                 decisions = _parse_per_image_decisions(raw, len(cands_filt), shortlist)
@@ -481,26 +406,10 @@ def main() -> None:
                 continue
             # === end per-image mode; below is per-candidate mode ===
 
-            if use_support:
-                filtered_refs = [r for r in support_refs if r.category_name in shortlist] or support_refs
-                support_image_paths = [r.crop_path for r in filtered_refs]
-                support_cat_names = [r.category_name for r in filtered_refs]
-                if args.enriched_context:
-                    instruction = None  # per-candidate build
-                else:
-                    instruction = _build_reference_match_instruction(
-                        base_instruction=prompt_text,
-                        support_references=filtered_refs,
-                        allowed_categories=shortlist,
-                    )
-            else:
-                filtered_refs = []
-                support_image_paths = []
-                support_cat_names = []
-                # non-enriched path uses simple _build_instruction; enriched needs per-candidate label_text
-                instruction = None  # built per-candidate if enriched
-                if not args.enriched_context:
-                    instruction = _build_instruction(prompt_text, shortlist)
+            # non-enriched path uses simple _build_instruction; enriched needs per-candidate label_text
+            instruction = None  # built per-candidate if enriched
+            if not args.enriched_context:
+                instruction = _build_instruction(prompt_text, shortlist)
 
             for cand_idx, cand in enumerate(candidates):
                 n_candidates += 1
@@ -540,12 +449,7 @@ def main() -> None:
                         ocr_hint = ''
 
                     base = dococr_prompt_text if (is_doc and dococr_prompt_text) else prompt_text
-                    if args.enriched_context and use_support:
-                        instruction_this = _build_enriched_support_instruction(
-                            base, cue_text, label_text, shortlist, support_cat_names,
-                            ocr_text=ocr_text, ocr_hint=ocr_hint,
-                        )
-                    elif args.enriched_context:
+                    if args.enriched_context:
                         instruction_this = _build_enriched_instruction(
                             base, cue_text, label_text, shortlist,
                             ocr_text=ocr_text, ocr_hint=ocr_hint,
@@ -553,11 +457,7 @@ def main() -> None:
                     else:
                         instruction_this = instruction
 
-                    if use_support:
-                        image_paths = [*support_image_paths, crop_path]
-                        raw = client.generate_images(image_paths, instruction=instruction_this)
-                    else:
-                        raw = client.generate(crop_path, instruction=instruction_this)
+                    raw = client.generate(crop_path, instruction=instruction_this)
                 finally:
                     Path(crop_path).unlink(missing_ok=True)
 
