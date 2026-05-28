@@ -13,6 +13,13 @@ together with the cues, are passed as text prompts to an open-vocabulary
 detector (Grounding DINO), which proposes candidate boxes over a wider search
 space than fixed category names alone.
 
+| SC | Category |
+|---|---|
+| Document (8) | Bills or receipt, Bank statement, Transcript, <br> Letters with address, Local newspaper, <br> Medical record document, Doctors prescription, <br> Mortgage or investment report |
+| Health (5) | Pregnancy test, Pregnancy test box, <br> Condom box, Condom with plastic bag, <br> Empty pill bottle |
+| Card (2) | Credit or debit card, Business card |
+| Tattoo sleeve (1) | Tattoo sleeve |
+
 **Phase 2 — Rematching.** The query image, annotated with all proposed boxes,
 is presented to the VLM in a single call with the Phase-1 context and a scene
 caption. The VLM rematches each proposal against the closed set of categories
